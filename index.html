@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ছবি থেকে Base64 কোড জেনারেটর</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family:'Segoe UI',Arial,sans-serif; background:#f0f2f5; margin:0; padding:15px; }
+.wrap { max-width:760px; margin:0 auto; background:#fff; border:1px solid #ccc; border-radius:6px; padding:16px; }
+h3 { margin:0 0 12px; text-align:center; }
+.drop { border:2px dashed #007bff; border-radius:6px; padding:22px; text-align:center; color:#007bff; cursor:pointer; background:#f7fbff; }
+.drop.over { background:#e3f1ff; }
+.opts { display:flex; flex-wrap:wrap; gap:14px; margin:12px 0; font-size:13px; align-items:center; }
+.opts input[type=number] { width:70px; padding:3px; }
+.opts input[type=range] { vertical-align:middle; }
+.preview { text-align:center; margin:10px 0; }
+.preview img { max-width:200px; max-height:200px; border:1px solid #ddd; border-radius:4px; background:#fff; }
+.info { text-align:center; font-size:13px; color:#444; min-height:18px; }
+label.t { font-size:13px; font-weight:bold; display:block; margin:10px 0 4px; }
+textarea { width:100%; height:110px; font-family:Consolas,monospace; font-size:11px; padding:6px; border:1px solid #bbb; border-radius:4px; }
+button { padding:7px 16px; cursor:pointer; border-radius:4px; border:none; font-weight:bold; font-size:13px; margin:4px 4px 0 0; color:#fff; background:#28a745; }
+button.alt { background:#6c757d; }
+#ok { color:#28a745; font-size:13px; margin-left:6px; }
+.err { color:#dc3545; text-align:center; font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h3>ছবি থেকে Base64 কোড তৈরি</h3>
+
+  <div class="drop" id="drop" onclick="document.getElementById('file').click()">
+    এখানে ক্লিক করুন বা ছবি টেনে এনে ছাড়ুন
+    <input type="file" id="file" accept="image/*" hidden>
+  </div>
+
+  <div class="opts">
+    <label>সর্বোচ্চ আকার (px): <input type="number" id="maxpx" value="200" min="16" max="2000" onchange="convert()"></label>
+    <label>ফরম্যাট:
+      <select id="fmt" onchange="convert()">
+        <option value="image/jpeg" selected>JPEG (ছোট ফাইল)</option>
+        <option value="image/png">PNG (স্বচ্ছতা থাকলে)</option>
+        <option value="image/webp">WebP</option>
+      </select>
+    </label>
+    <label>মান: <input type="range" id="q" min="0.3" max="1" step="0.05" value="0.85" oninput="convert()"> <span id="qv">85%</span></label>
+  </div>
+
+  <div class="err" id="err"></div>
+  <div class="preview"><img id="prev" style="display:none"></div>
+  <div class="info" id="info"></div>
+
+  <label class="t">Base64 ডেটা URL:</label>
+  <textarea id="out" readonly placeholder="ছবি দিলে কোড এখানে আসবে"></textarea>
+  <button onclick="copyText('out')">কপি করুন</button>
+
+  <label class="t">তৈরি কোড (সরাসরি পেস্ট করার জন্য):</label>
+  <textarea id="snip" readonly></textarea>
+  <button onclick="copyText('snip')">কপি করুন</button>
+  <button class="alt" onclick="copyText('img')">&lt;img&gt; ট্যাগ কপি</button>
+  <textarea id="img" hidden></textarea>
+  <span id="ok"></span>
+</div>
+
+<script>
+let srcImg = null;
+const $ = id => document.getElementById(id);
+
+$('file').addEventListener('change', e => { load(e.target.files[0]); e.target.value = ''; });
+const drop = $('drop');
+['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => load(e.dataTransfer.files[0]));
+
+function setImg(im) { srcImg = im; $('err').textContent = ''; convert(); }
+
+function showFail(file) {
+  const t = file.type || (file.name.split('.').pop() || 'অজানা');
+  $('err').textContent = `ছবিটি পড়া যায়নি (ফরম্যাট: ${t})। HEIC/HEIF বা নষ্ট ফাইল হলে ছবিটি JPG/PNG করে বা স্ক্রিনশট নিয়ে আবার দিন।`;
+}
+
+function load(file) {
+  $('err').textContent = '';
+  if (!file) return;
+  if (file.type && !file.type.startsWith('image/')) { $('err').textContent = 'অনুগ্রহ করে একটি ছবির ফাইল দিন।'; return; }
+
+  // ধাপ ১: FileReader দিয়ে data URL (blob URL এর চেয়ে নির্ভরযোগ্য)
+  const fr = new FileReader();
+  fr.onload = () => {
+    const im = new Image();
+    im.onload = () => setImg(im);
+    im.onerror = () => tryBitmap(file);   // ধাপ ২: বিকল্প পদ্ধতি
+    im.src = fr.result;
+  };
+  fr.onerror = () => tryBitmap(file);
+  fr.readAsDataURL(file);
+}
+
+function tryBitmap(file) {
+  if (window.createImageBitmap) {
+    createImageBitmap(file).then(setImg).catch(() => showFail(file));
+  } else showFail(file);
+}
+
+function convert() {
+  $('qv').textContent = Math.round($('q').value * 100) + '%';
+  if (!srcImg) return;
+  const max = Math.max(16, parseInt($('maxpx').value) || 200);
+  const sw = srcImg.naturalWidth || srcImg.width, sh = srcImg.naturalHeight || srcImg.height;
+  const scale = Math.min(1, max / Math.max(sw, sh));
+  const w = Math.max(1, Math.round(sw * scale)), h = Math.max(1, Math.round(sh * scale));
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  const fmt = $('fmt').value;
+  if (fmt === 'image/jpeg') { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); }
+  ctx.drawImage(srcImg, 0, 0, w, h);
+  const data = c.toDataURL(fmt, parseFloat($('q').value));
+
+  $('prev').src = data; $('prev').style.display = 'inline-block';
+  $('out').value = data;
+  $('snip').value = `const LOGO_SRC = "${data}";`;
+  $('img').value = `<img src="${data}" alt="">`;
+  const kb = (data.length / 1024).toFixed(1);
+  $('info').textContent = `আকার: ${w}×${h}px | কোডের দৈর্ঘ্য: ${data.length} অক্ষর (~${kb} KB)`;
+}
+
+function copyText(id) {
+  const t = $(id);
+  const txt = t.value;
+  if (!txt) return;
+  const done = () => { $('ok').textContent = 'কপি হয়েছে ✓'; setTimeout(() => $('ok').textContent = '', 1800); };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(txt).then(done).catch(() => fallback(t, done));
+  } else fallback(t, done);
+}
+function fallback(t, done) {
+  t.hidden = false; t.select(); document.execCommand('copy');
+  if (t.id === 'img') t.hidden = true;
+  done();
+}
+</script>
+</body>
+</html>
